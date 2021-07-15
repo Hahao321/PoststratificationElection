@@ -1,0 +1,447 @@
+---
+title: "Predicting the Canadian Election Results through Post-Stratification "
+author: "Haoying Shen"
+date: May 28, 2021
+output:
+  pdf_document: default
+---
+
+```{r, include=FALSE}
+knitr::opts_chunk$set(warning = FALSE, message = FALSE)
+library(broom)
+library(tidyverse)
+library(kableExtra)
+library(cowplot)
+set.seed(0566)
+```
+
+
+
+```{r, include = FALSE}
+
+# Here you can load in the census data 
+
+census_data <- read_csv("gss_clean.csv")
+
+# Here you can load in the survey data
+
+survey_data <- read_csv("ces2019-phone_clean.csv")
+
+```
+
+
+## Introduction
+
+Elections are a time for citizens of their respective country to vote for an authority figure that they believe will lead their country in the best way. Different people will have their own opinions based on their own circumstances on which country to vote for. Unfortunately, what specific circumstances may not be clear. This study will investigate relationships between the backgrounds of Canadian citizens and which party they will vote for. The data that will be used includes a phone survey done from 2019 and Canadian census data from 2017, both of which includes information on sex, age, education, province, and income for the participants. Additionally, the phone survey includes what party is preferred by the surveyed individual. With this analysis we will also attempt to predict which party is more favorable based on sex, age, income, education, and location. Understanding what factors contribute to favourability to a party can be important for government parties to realize what features they must improve upon to gain votes [1]. This leads us to our overall research question of if economic, status, age, education level, and sex can be used to predict the election results for 2023. Specifically, we are looking to predict which of the 2 large parties of Canada will win, the Conservative party, or the Liberal party [2]. Since economic status, age, education level, location, and sex all affect the circumstance and outlook of life for the individual, we believe that there may be some effect on what party any individual favors based on these factors, and these effects will be investigated.
+
+
+## Data
+
+The data was collected from the General Social Survey of Canada (GSS), which is a completely voluntary survey that occurs annually. The survey is done through online questionnaires and interviews over the phone [3]. The GSS used in this study in the 2017 version which focuses on family aspects, such as number of children, marriage status, and family origins. The data used to take for this paper includes the sex, financial status, education level, and age of survey participants. The second dataset used is the Canadian Election Study (CES), which is a survey that is done in two steps, first being during the election campaign, and second being after the election [4]. The survey is collected through phone interviews and online. For this study, the phone interviews during the election campaign were used, and information on sex, financial status, education level, age, as well as political party preference was taken. 
+
+```{r, include = FALSE}
+
+#### You will need to update/clean the code below based off the variables you want to use in your post stratification.
+survey_data <- 
+  survey_data %>% 
+  select(q2, q11, q4, q61, q3, q69)
+
+survey_data <-survey_data %>% filter(q11 == c(1,2))
+survey_data <-survey_data %>% filter(q3 == c(1,2))
+survey_data <-survey_data %>% filter(q69 >= 0)
+
+survey_data <- survey_data %>% 
+  mutate(age = 2021-q2, party = ifelse(q11 == 1, 1, 0), sex = ifelse(q3 == 1, "Male", "Female"))
+
+survey_data <- survey_data %>% 
+  mutate(income = cut(q69, c(-Inf, 24999, 49999, 74999, 99999, 124999, Inf)))
+
+levels(survey_data$income) = c("Less than $25,000", "$25,000 to $49,999", "$50,000 to $74,999", "$75,000 to $99,999", "$100,000 to $ 124,999", "$125,000 and more")
+
+survey_data <- survey_data %>% 
+  mutate(education = cut(q61, c(0, 4, 6, 7, 8, 9, 11)))
+
+levels(survey_data$education) = c("Less than high school diploma or its equivalent", "High school diploma or a high school equivalency certificate", "College/Trades", "High school diploma or a high school equivalency certificate","Bachelor's degree/University certificate","Above University Degree")
+
+survey_data <- survey_data %>% 
+  mutate(province = cut(q4, c(0, 1, 2, 3, 4, 5,6,7,8,9,10)))
+
+levels(survey_data$province) = c("Newfoundland and Labrador", "Prince Edward Island", "Nova Scotia", "New Brunswick", "Quebec","Ontario", "Manitoba","Saskatchewan","Alberta","British Columbia")
+
+survey_data <- survey_data %>% select(party, age, income, sex, province, education)
+
+survey_data <- na.omit(survey_data)
+```
+
+```{r, include = FALSE}
+census_data <- census_data %>% 
+  mutate(age=round(age), income = income_respondent) %>% 
+  select(age, sex, province, income, education)
+
+census_data <- na.omit(census_data)
+
+census_data$education[census_data$education == "College, CEGEP or other non-university certificate or di..."] <- "College/Trades"
+
+census_data$education[census_data$education == "Trade certificate or diploma"] <- "College/Trades"
+
+census_data$education[census_data$education == "University certificate, diploma or degree above the bach..."] <- "Above University Degree"
+
+census_data$education[census_data$education == "Bachelor's degree (e.g. B.A., B.Sc., LL.B.)"] <-"Bachelor's degree/University certificate"
+
+census_data$education[census_data$education == "University certificate or diploma below the bachelor's level"] <-"Bachelor's degree/University certificate"
+```
+
+### Data Cleaning
+
+All data cleaning for this report was programmed using `R version 4.0.2` using functions from `tidyverse` [5,6]. 
+
+The CES data was cleaned by using the r’s `select()` function to reduce the dataset to the 6 questions important to our study this was done by running `survey_data %>% select(q2,  q11,  q4, q3, q69)` . Since question 11 is party preference and it also includes parties aside from the 2 largest parties which is represented by 1 and 2, the responses that were not 1 and 2 are filtered out using ` survey_data %>% filter(q11 == c(1,2))`. Question 3 represents the sex of the participant, which originally includes male, female, and transgender, represented by 1, 2, and 3 respectively. The transgender category was removed as there was only one datapoint, which is not enough of a sample size to create any analysis. This was done using ` survey_data %>% filter(q3 == c(1,2))`. Question 69 asks for the income of the individual, which is a raw number; to get rid of the negative values which represents those who did not answer ` survey_data %>% filter(q69 >= 0)` was run to get rid of these values. Next the following code was run ` survey_data %>% mutate(age = 2021-q2, income = cut(q69, c(-Inf, 24999, 49999, 74999, 99999, 124999, Inf)), party = ifelse(q11 == 1, 1, 0), sex = ifelse(q3 == 1, "Male", "Female"))`. This creates a variable age, which subtracts 2021 from the participant’s birth year to give an age. This also sets party to a proper binomial variable  where 1 represents the liberal party, and 0 represents the conservative party. Sex is set so that 1 is now Male, and 2 is now Female. Next the `cut()` function is used on income to group the raw income into categories using  `survey_data %>% mutate(income = cut(q69, c(-Inf, 24999, 49999, 74999, 99999, 124999, Inf)))`. The categories are then renamed using the `levels()` function `levels(survey_data$income) = c("Less than $25,000", "$25,000 to $49,999", "$50,000 to $74,999", "$75,000 to $99,999", "$100,000 to $ 124,999", "$125,000 and more")`. The same process was done for education, ` survey_data %>% mutate(education = cut(q61, c(0, 4, 6, 7, 8, 9, 11)))` where the numerical values were grouped, and then renamed using ` levels(survey_data$education) = c("Less than high school diploma or its equivalent", "High school diploma or a high school equivalency certificate", "College/Trades", "High school diploma or a high school equivalency certificate","Bachelor's degree/University certificate","Above University Degree")`. Similarly, the numerical answers of provinces was also converted using `cut()`.  ` survey_data %>% mutate(province = cut(q4, c(0, 1, 2, 3, 4, 5,6,7,8,9,10)))` and the numbers were renamed using ` levels(survey_data$province) = c("Newfoundland and Labrador", "Prince Edward Island", "Nova Scotia", "New Brunswick", "Quebec","Ontario", "Manitoba","Saskatchewan","Alberta",\n "British Columbia")`.  The territories were removed from the dataset as there were no datapoints for them. Continuing, ` survey_data %>% select(party, age, income, sex, province, education)` was called to take only the variables party, age, income, sex , province, and education.  Finally `na.omit(survey_data)`  is used to remove any missing values.
+
+
+### Important Variables
+
+*Sex* – Categorical variable which determines the sex of the surveyed individual. This variable is used to investigate the differences in preferred party between the different sexes.
+
+*Age* – Continuous variable which determines the age of the surveyed individual. This variable is important in investigating how the relationship between party preference.
+
+*Province* – Categorical variable which determines the provincial location of the surveyed individual. This variable is important in investigating how the province of an individual influences the which federal party is favored.
+
+*Income* – Categorical variable that determines the financial status of the surveyed individual. This variable is crucial in investigating the relationship between the financial status of an individual and the party preference.
+
+*Education* – Categorical variable that is indicates the highest level of education achieved by the surveyed individual. This variable will be used to determine if there is any relationship between education level and the party preference of the survey participant.
+
+*Party* – Binomial variable that represents which of the 2 major political parties is preferred, conservative or liberal.
+
+
+```{r, echo = FALSE}
+#Creating a Summary table for the age of participants of the survey and census
+surveydf <- as.data.frame(survey_data$age)
+censusdf <- as.data.frame(census_data$age)
+agesummary1 <- as.data.frame(apply(surveydf, 2, summary))
+agesummary2 <- as.data.frame(apply(censusdf, 2, summary))
+agesummary <- as.data.frame(apply(merge(agesummary1, agesummary2), 2, summary))
+colnames(agesummary) <- c("Survey Age Summary", "Census Age Summary")
+sdev <- data.frame(sd(survey_data$age), sd(census_data$age))
+names(sdev) <- c("Survey Age Summary", "Census Age Summary")
+agesummary <- rbind(agesummary,sdev)
+rownames(agesummary)[rownames(agesummary) == "1"] = "SD"
+kable(round(agesummary,2), caption = "Summary of spread for participant ages in Survey and Census Data")
+
+#Creating Frequency/Percentage table for Income
+#Survey
+sfreqInc<-table(survey_data$income)
+sperInc<- round(prop.table(sfreqInc), 2) * 100
+SurveyIncome <- rbind(sfreqInc, sperInc)
+rownames(SurveyIncome) <- c("Survey Frequency", "Survey Percentage")
+
+#Census
+cfreqInc<-table(census_data$income)
+cperInc<- round(prop.table(cfreqInc), 2) * 100
+CensusIncome <- rbind(cfreqInc, cperInc)
+rownames(CensusIncome) <- c("Census Frequency", "Census Percentage")
+
+#Creating Kable for income
+kable(rbind(SurveyIncome,CensusIncome), caption = "Frequency and Percentage of Income Categories of Survey and Census Data")%>%
+  kable_styling() %>% 
+  kable_styling(latex_options="scale_down")%>%
+  column_spec(1:6, width = "2cm")
+
+#Creating Frequency/Percentage table for education
+#Survey
+sfreqEd<-table(survey_data$education)
+sperEd<- round(prop.table(sfreqEd), 2) * 100
+SurveyEdu <- rbind(sfreqEd, sperEd)
+rownames(SurveyEdu) <- c("Survey Frequency", "Survey Percentage")
+
+#Census
+cfreqEd<-table(census_data$education)
+cperEd<- round(prop.table(cfreqEd), 2) * 100
+CensusEdu <- rbind(cfreqEd, cperEd)
+rownames(CensusEdu) <- c("Census Frequency", "Census Percentage")
+
+#Creating Kable for education
+kable(rbind(SurveyEdu,CensusEdu), caption = "Frequency and Percentage of Education Categories of Survey and Census Data")%>% 
+  kable_styling(latex_options="scale_down")%>%
+  column_spec(1:5, width = "2cm")
+
+
+#Creating Frequency/Percentage table for provinces
+#Survey
+sfreqProv<-table(survey_data$province)
+sperProv<- round(prop.table(sfreqProv), 2) * 100
+SurveyProvince <- rbind(sfreqProv, sperProv)
+rownames(SurveyProvince) <- c("Survey Frequency", "Survey Percentage")
+
+#Census
+cfreqProv<-table(census_data$province)
+cperProv<- round(prop.table(cfreqProv), 2) * 100
+CensusProvince <- rbind(cfreqProv, cperProv)
+rownames(CensusProvince) <- c("Census Frequency", "Census Percentage")
+
+#Creating Kable for education
+kable(rbind(SurveyProvince,CensusProvince), caption = "Frequency and Percentage of Survey and Census Participant's Provinces")%>% 
+  kable_styling(latex_options="scale_down")%>%
+  column_spec(1:6, width = "2cm")
+
+
+#Creating Frequency/Percentage table for participant sex
+#Survey
+sfreqSex<-table(survey_data$sex)
+sperSex<- round(prop.table(sfreqSex), 2) * 100
+SurveySex <- rbind(sfreqSex, sperSex)
+rownames(SurveySex) <- c("Survey Frequency", "Survey Percentage")
+
+#Census
+cfreqSex<-table(census_data$sex)
+cperSex<- round(prop.table(cfreqSex), 2) * 100
+CensusSex <- rbind(cfreqSex, cperSex)
+rownames(CensusSex) <- c("Census Frequency", "Census Percentage")
+
+#Creating Kable for sex
+kable(rbind(SurveySex,CensusSex), caption = "Frequency and Percentage of Survey and Census Participant's Sex")
+```
+
+All tables are created using the kableExtra package's `kable()` function [7].
+
+### Summary and Spread of Data
+
+From Table 1 we can see that the census and survey data show very similar numbers with means and medians around the 50s and roughly the same standard deviation of 16.15 and 17.74, the minimum and maximum values tend to be higher in the survey compared to the census. Table 2 shows the frequency and percentage of income, and we can observe that the survey has a relatively even distribution throughout all income categories, apart from \$125,000 and more. Unlike the census, which has most of the observations in the \$125000 and more as well as the \$75000 to \$99999 categories. Table 3 presents the frequency and percentage of education levels where both the census and survey sample show similar distributions with the high school, college, and university levels being the most frequent. Table 4 Showcases the distribution of both sample between the provinces, the survey shows a majority in British Columbia, Ontario, and Quebec, which match the population data. Surprisingly, we see that Manitoba and Alberta are the most frequent observations in the census data. Finally, Table 5 shows the distributions of respondent sex, in both datasets, where in the survey males are more frequent and inversely, the opposite is true for the census. Overall, we see that the summary and spread of the data is generally similar between the two datasets.
+
+```{r, echo = FALSE,fig.align='center'}
+inc <- survey_data$income
+vote <- survey_data$party
+df <- data.frame(inc,vote)
+df <- df %>% 
+    mutate(vote = recode(vote, 
+                      "1" = "Liberal", 
+                      "0" = "Conservative"))
+ggplot(df, aes(inc, ..count..)) + geom_bar(aes(fill = vote), position = "dodge") + theme_minimal() +theme(axis.text.x = element_text(angle = 60, hjust = 1)) +   
+  labs(y="Number of Votes", 
+       x="Income Bracket", 
+       caption ="Figure 1. Distribution of votes between income brackets")+ theme(plot.caption = element_text(hjust = 0.5))
+
+ed <- survey_data$education
+df2 <- data.frame(ed,vote)
+df2 <- df2 %>% 
+    mutate(vote = recode(vote, 
+                      "1" = "Liberal", 
+                      "0" = "Conservative"))
+ggplot(df2, aes(ed, ..count..)) + geom_bar(aes(fill = vote), position = "dodge")+ theme_minimal() + theme(axis.text.x = element_text(angle = 60, hjust = 1)) + scale_x_discrete(label = function(x) stringr::str_trunc(x,  20)) +   
+  labs(y="Number of Votes", 
+       x="Education Level", 
+       caption ="Figure 2. Distribution of votes between education levels")+ theme(plot.caption = element_text(hjust = 0.5))
+
+prov <- survey_data$province
+df3 <- data.frame(prov,vote)
+df3 <- df3 %>% 
+    mutate(vote = recode(vote, 
+                      "1" = "Liberal", 
+                      "0" = "Conservative"))
+ggplot(df3, aes(prov, ..count..)) + geom_bar(aes(fill = vote), position = "dodge") + theme_minimal()+ theme(axis.text.x = element_text(angle = 60, hjust = 1)) +  scale_x_discrete(label = function(x) stringr::str_trunc(x, 20)) +   
+  labs(y="Number of Votes", 
+       x="Province", 
+       caption ="Figure 3. Distribution of votes between Provinces")+ theme(plot.caption = element_text(hjust = 0.5))
+
+
+ggplot(survey_data, aes(x=age, y=party))+geom_point(size=1, alpha=0.2)+
+  stat_smooth(method="loess", colour="red", size=1.5)+
+  xlab("Age")+
+  ylab("Probability of of voting Liberal")+
+  theme_minimal() + facet_wrap(~survey_data$sex) + 
+  labs(caption ="Figure 4. Probability of voting liberal over age, split between sex") + theme(plot.caption = element_text(hjust = 0.5))
+```
+
+All plots in this analysis is created using `ggplot` from `tidyverse [6].
+
+Figure 1 shows the number of votes for conservatives or liberals between the different income categories. From the bar graph, we can observe that those who make over \$125,000 tend to favor the conservatives more. This is similar in the category of \$50,000 to \$74,999 where conservatives are also favored. Continuing those who make between \$25,000 to \$49,999 and \$75,000 to \$99,999 are observed to have voted for liberals more frequently. The other two categories seem to be rather even with their votes.
+
+Figure 2 shows the number of votes for conservatives or liberals between the different education levels. From the figure we can see that those who have not completed high school, those who have graduated highschool, and those in college or trades tend to favor the conservative party. Inversely, those who have education higher than a bachelor's heavily favor the liberal party. Whereas those in the bachelor category show votes between the parties.
+
+Figure 3 shows the number of votes for conservatives or liberals between the provinces. The figure shows that 6 out of 10 countries favor the liberals including Newfoundland and Labrador, Prince Edward Island, Nova Scotia, New Brunswick, Quebec and Ontario. While Manitoba, Saskatchewan, British columbia, and especially Alberta favor the conservatives
+
+Figure 4 shows the probability of of voting liberal given age and sex, where 1 represents a vote for liberals, and 0 represents a vote for the conservatives. we can see that males tend to be more likely to vote conservative while females are more likely to vote liberal. Additionally both sexes tend become more likely to vote liberal as age increases.
+
+## Methods
+
+For this study, we will assume that none of the predictors share any relations with each other even should certain variables such as education and income be related in some sense. We will use post stratification to predict the results of the election, we will do this by using a model to determine the effects of each of the variables: sex, age, province, income, and education on the choice of party on the phone survey data, or in other words their weights. Then we will use those weights on the GSS data, which has far more participants to determine what is the popular vote.
+
+
+### Model Specifics
+
+To be able to predict the outcome of election, we must first use the phone survey data to determine what effects sex, age, province, income, and education on the preferred major party. As our response variable consists of only two outcomes, it is binary. Although, province is a level 2 variable, meaning it centers around a group rather than the individual, indicating a multi-level logistic regression. We would also like to observe the effect of an individual’s province on their preferred party. Therefore, ordinary logistic regression is the model to be used. The logistic regression model is as following:
+
+$$ log(\frac{p}{1-p}) = \beta_0+\beta_1  x_{age} + \beta_2  x_{sex} +\beta_3  x_{income} +\beta_4  x_{education} +\beta_5  x_{province} + \epsilon$$
+
+Where $p$ represents the probability of voting for liberals, and $1-p$ represents the probability of voting for conservatives. $log(\frac{p}{1-p})$ then represents the log-odds of voting liberals   $\beta_0$ represents the intercept, which occurs should all of the other predictors be 0, or in other words the baseline. $\beta_1$ represents how much of an effect age has on determining the log-odds. $\beta_2$ represents the coefficient determining how much of an effect sex has on determining the log-odds. $\beta_3$ represents the coefficient determining how much of an effect income has on determining the log-odds. $\beta_4$ represents the coefficient determining how much of an effect education level has on determining the log-odds. Finally, $\beta_5$ represents the coefficient determining how much of an effect the province of an individual has on determining the log-odds
+
+```{r, include = FALSE}
+
+# Creating the Model
+model <- glm(party ~ age + income + education + province + sex, family = "binomial", data=survey_data)
+
+# Model Results (to Report in Results section)
+summary(model)
+# OR
+
+
+### Don't show the results/output here...
+
+```
+
+
+### Post-Stratification 
+
+We will predict how the GSS dataset will respond when given the parameters of the model created above. To perform this prediction, we must account for the fact that the two datasets may be extremely different as shown in the tables above (table 1, 2, 3, 4, 5). Post stratification allows us to circumvent this by using the model above to determine how each of the individual effects will affect the response variable (party preference) and will match the most likely response of those who fall into certain cells [8]. Cells are one specific and unique combination of all the predictors, including: sex, age, province, income, and education.  
+
+To perform the post stratification, we first grouped all the observations in the GSS dataset with groups created by the variables: sex, age, province, income, and education. Where those with the same sex, age, province, income, and education were grouped together and the total number in each category was counted.  Since the GSS dataset contains only those of ages 15-80, there are 65 unique groupings of age. With 10 provinces to choose from, there will be 10 groupings from provinces. Income provides 6 more categories to group by, while education provides 5. Finally, sex provides 2 more factors to group by. Overall creating $ 65 * 10 * 6 * 5 * 2 = 39000$ unique cells to group by, of course not all these cells are used, as the dataset only uses 10708 of these cells. Providing us with this post stratification equation:
+$$ \hat{y}^{PS} = \frac{\sum N_j \hat{y}_j}{\sum N_j}$$
+Where $\hat{y}^{PS}$ represents the average estimate for the GSS population. $N_j$ the total number of people who belong in the $jth$ cell and $\hat{y}_j$ represents the estimate of that $jth$ cell.
+
+To simplify, we used the phone survey to see what types of people preferred which of the two major parties. Then using the census data which is far larger we found the people most alike predict how likely each type of individual was to vote for a certain party.  This was done for all observations in the census data to determine which party would have more votes in the end.
+
+All analysis for this report was programmed using `R version 4.0.2` [5]. 
+
+## Results 
+
+```{r, include = FALSE}
+
+# Creating the Model
+model <- glm(party ~ age + income + education + province + sex, family = "binomial", data=survey_data)
+
+# Model Results (to Report in Results section)
+# summary(model)
+# OR
+model_tab <- broom::tidy(model)
+model_tab_clean <- model_tab %>% 
+  mutate(term = recode(term, age = "Age", "income$25,000 to $49,999" = "Income: $25,000 to $49,999", "income$50,000 to $74,999" = "Income: $50,000 to $74,999", "income$75,000 to $99,999" = "Income: $75,000 to $99,999", "income$100,000 to $ 124,999" = "Income: $100,000 to $ 124,999", "income$125,000 and more" = "Income: $125,000 and more", "educationHigh school diploma or a high school equivalency certificate" = "Completed Highschool or Equivilent", "educationCollege/Trades" = "Completed College/Trades", "educationBachelor's degree/University certificate" = "Completed Bachelor's degree/University certificate", "educationAbove University Degree" = "Completed Above University","provincePrince Edward Island" = "Prince Edward Island", "provinceNova Scotia" = "Nova Scotia", "provinceNew Brunswick" = "New Brunswick", "provinceOntario" = "Ontario", "provinceQuebec" = "Quebec", "provinceManitoba" = "Manitoba", "provinceSaskatchewan" = "Saskatchewan", "provinceAlberta" = "Alberta", "provinceBritish Columbia" = "British Columbia", "sexMale" = "Sex: Male"))
+model_tab_clean <- model_tab_clean %>%
+  mutate(odds = exp(estimate))
+model_tab_clean <- model_tab_clean %>% mutate_if(is.numeric, ~round(.,3))
+```
+
+```{r, echo = FALSE}
+kable(model_tab_clean, caption = "Summary of estimates for the logistic regression model on the survey data")
+```
+
+Summary statistics calcuated using r's `summary()` and cleaned using the `broom` package [5,9].
+
+### The Model
+
+  From the summary plot we see that there are missing values, such as Income: less than $25,000, this is because that value is chosen as the baseline. Meaning keeping all else constant and changing the income category to \$25,000 to \$45,000 will have 2.27x the odds of voting for the liberal party. We can observe that also increases the odds of voting for liberals by 0.09x for each increase in age. From the odds of income, we can observe that most income brackets are more likely to vote liberals than the baseline which is an income of less than 25000 dollars. Only those who make more than 125,000 dollars are less likely to vote for the liberal party. However, the p-values of these are all rather large apart from those who make 25000 to 74999 dollars per year. Education seems to show an increase in odds of voting for the liberal party as the level of education increases with those who complete levels of education above university having 4.4x the odds of voting for the liberal party in comparison to the baseline of less than high school. The p values are still rather large for the high school graduates and the college/trades category, indicating this increase may just be due to variance. However, the above university category shows high significance, and those who completed a bachelors also show a somewhat moderate significance. Using Newfoundland and Labrador as the baseline many of the provinces show differences in opinion for preferred party. Prince Edward Island has 0.877x the odds of voting liberal in comparison. Nova Scotia and New Brunswick have 0.883x and 0.66x the odds of voting liberal compared to Newfoundland and Labrador, respectively.  Similarly, Ontario also shows lower odds of voting for liberals at 0.813x. Quebec is the only province that is more likely to vote for liberals by odds of 1.508x. Manitoba, Saskatchewan, and British Columbia show much lower odds of voting liberal at 0.316x, 0.181x and 0.486x respectively. Alberta shows the lowest odds of voting for liberals in comparison to Newfoundland and Labrador with odds of 0.102x. The p-values of the provinces mostly do not show any significance; however, Alberta, Manitoba and Saskatchewan do show that they are significantly less likely to vote for liberals. Compared the females, males are less likely to vote for liberals in comparison. Overall, we do see difference between categories, however the p-values of these are lacking, and many of the differences may simply be due to variance. 
+  
+```{r, include =FALSE}
+
+# Here I will perform the post-stratification calculation
+census_data_counts <- census_data %>% 
+  group_by(age, income, education, sex, province) %>% 
+  summarise(n=n())
+
+census_data_counts$estimate <-
+  model %>%
+  predict(newdata = census_data_counts)
+
+census_data_counts <- census_data_counts %>%
+  mutate(prop_estimate = exp(estimate)/(1+exp(estimate)))
+
+census_data_counts <- census_data_counts %>% 
+  mutate(Lib_predict_prop = prop_estimate*n)
+  
+yes <-census_data_counts%>%
+  summarise(Lib_predict = sum(Lib_predict_prop)/sum(n))
+
+Chance_Lib <- mean(yes$Lib_predict)
+Chance_Con <- 1- Chance_Lib
+winner <- data.frame("Party" = c("Liberal", "Conservative"), "Probability" = c(round(Chance_Lib,3), round(Chance_Con,3)))
+```
+
+```{r, echo = FALSE}
+kable(winner, caption = "Probability of winning for each party")
+```
+
+
+
+
+```{r, echo = FALSE}
+par(mar=c(10,3,1,1))
+
+Incomegroup <- census_data_counts%>%
+  group_by(income) %>%
+  summarise(Lib_predict_prop = mean(Lib_predict_prop/n))
+
+Edugroup <- census_data_counts%>%
+  group_by(education) %>%
+  summarise(Lib_predict_prop = mean(Lib_predict_prop/n))
+
+Provgroup <- census_data_counts%>%
+  group_by(province) %>%
+  summarise(Lib_predict_prop = mean(Lib_predict_prop/n))
+
+Agegroup <- census_data_counts%>%
+  group_by(age) %>%
+  summarise(Lib_predict_prop = mean(Lib_predict_prop/n))
+
+Sexgroup <- census_data_counts%>%
+  group_by(sex) %>%
+  summarise(Lib_predict_prop = mean(Lib_predict_prop/n))
+
+a <- ggplot() +
+  geom_point(data = Incomegroup, aes(x = income, y = Lib_predict_prop), color = "blue") + ylim(0,1) + geom_hline(yintercept = 0.5) + theme_minimal() + theme(axis.text.x = element_text(angle = 60, hjust = 1, size = 5))  +  scale_x_discrete(label = function(x) stringr::str_trunc(x, 20)) + labs(y = "Probability of voting liberal" , x = "Income",axis.text.y =element_text(size = 5))
+
+b <- ggplot() +
+  geom_point(data = Edugroup, aes(x = factor(education), y = Lib_predict_prop), color = "blue") + ylim(0,1) + geom_hline(yintercept = 0.5) + theme_minimal() + theme(axis.text.x = element_text(angle = 60, hjust = 1, size = 5)) + theme(
+      axis.title.y = element_blank(),axis.text.y =element_text(size = 5))  +  scale_x_discrete(label = function(x) stringr::str_trunc(x, 20))  + labs(x = "Education")
+
+c <- ggplot() +
+  geom_point(data = Provgroup, aes(x = factor(province), y = Lib_predict_prop), color = "blue") + ylim(0,1) + geom_hline(yintercept = 0.5) +theme_minimal() + theme(axis.text.x = element_text(angle = 60, hjust = 1, size = 5)) + theme(
+      axis.title.y = element_blank(),axis.text.y =element_text(size = 5))  +  scale_x_discrete(label = function(x) stringr::str_trunc(x, 20))+ labs(x = "Province")
+
+d <- ggplot() +
+  geom_point(data = Agegroup, aes(x = factor(age), y = Lib_predict_prop), color = "blue") + ylim(0,1) + geom_hline(yintercept = 0.5) + scale_x_discrete(breaks=seq(15, 80, 10)) + theme_minimal() + theme(axis.text.x = element_text(angle = 60, hjust = 1, size = 5)) + theme(axis.title.y = element_blank(), axis.text.y =element_text(size = 5)) + labs(x = "Age")
+
+e <- ggplot() +
+  geom_point(data = Sexgroup, aes(x = factor(sex), y = Lib_predict_prop), color = "blue") + ylim(0,1) + geom_hline(yintercept = 0.5)+  theme_minimal() + theme(axis.text.x = element_text(angle = 60, hjust = 1, size = 5))  + theme(
+      axis.title.y = element_blank(),axis.text.y =element_text(size = 5))  +  scale_x_discrete(label = function(x) stringr::str_trunc(x, 20)) + labs(x = "Sex")
+
+p <- plot_grid(a,b,c,d,e, ncol = 5)
+p <- add_sub(p, "Figure 5: Probability of voting liberal throughout all predictor values for census data",size = 5)
+ggdraw(p)
+```
+
+Combined plot created using the `cowplot` package [10].
+
+### Prediction
+
+From table 7 we can see that that the liberals are likely to win this election with the census data population voting liberal with a probability of 52%, and the conservative party at 48%, this result does make sense due to the frequency of people who favor the liberals. To begin, from figure 5 we can see that females are more likely to vote for liberals, and from table 5 we see that there are more females in the census data at 54%. Furthermore, with the mean age of the census population being 50.86 as seen in table 1 and judging from figure 5, most of the data points seem to favor the liberals more. Furthermore, from table 3 we can see that although more of the census falls under the line at 0.5, at 61%, those who fall under the college/trades and high school category are not greatly under, while those with above and university degree are far more likely to vote liberal. Provinces seems to disagree with the current consensus, where although 6 of 10 countries are more likely to vote liberal (figure 4). Of the 4 countries more likely to vote conservative, makes up 55% of the census population. Finally, income tends to also favor conservatives where the categories that favor conservatives make up 67% of the census population as shown by figure 5 and table 2. Overall, as the predictors are mixed, but more of the figures tends to favor the liberals, the predicted result does seem fair.
+
+## Conclusions
+
+To conclude, we have created a reasonable prediction using post-stratification with a logistic regression model on the election using the General Social Survey of Canada and the Canadian Election Study.  From the data we were determined to see if certain predictors which affect Canadian life such as sex, age, income, education, and province affected their preferred choice of federal party. From the results we do see differences between categories of these variables, and through the post stratification we have predicted liberals to win with a probability of 52%. This, difference is indeed small, which falls in line with what is found with the individual variables, where the population and proportion of those who favor certain parties tend to be equal, while slightly favoring the liberals. This study is not without limitations however as certain populations in the census data are overrepresented, irrespective of the actual population. For example, while Ontario has the largest population in all of Canada, it only represents 7% of the census data [11]. Next steps for future analysis would be to use a dataset that is more representative of the actual population to create a more accurate prediction.
+
+
+## Bibliography
+
+
+1. Cohn, N. (2015, December 19). Why voter data is important to campaigns. Retrieved May 31, 2021, from https://www.seattletimes.com/nation-world/why-voter-data-is-important-to-campaigns/
+
+2. Parliament of Canada. Political Parties and Leaders. (2021). Retrieved May 31, 2021, from https://lop.parl.ca/sites/ParlInfo/default/en_CA/Parties/politicalPartiesLeaders
+
+3. Government of Canada, Statistics Canada. (2019). General Social Survey: An Overview, 2019. Retrieved May 31, 2021, from https://www150.statcan.gc.ca/n1/pub/89f0115x/89f0115x2019001-eng.htm
+
+4. Stephenson et al. (2020). 2019 Canadian Election Study - Online Survey, https://doi.org/10.7910/DVN/DUS88V, Harvard Dataverse, V1
+
+5. R Core Team (2021). R: A language and environment for statistical
+computing. R Foundation for Statistical Computing, Vienna,
+Austria. URL https://www.R-project.org/.
+
+6. Wickham et al. (2019). Welcome to the tidyverse. Journal of Open Source Software, 4(43), 1686, https://doi.org/10.21105/joss.01686
+
+7. Hao Zhu (2020). kableExtra: Construct Complex Table with 'kable' and Pipe Syntax. http://haozhu233.github.io/kableExtra/, https://github.com/haozhu233/kableExtra.
+
+8. Alexander, R. (2021). Telling Stories With Data. Retrieved May 31, 2021, from https://www.tellingstorieswithdata.com/multilevel-regression-with-post-stratification.html
+
+9. David Robinson, Alex Hayes and Simon Couch (2021). broom: Convert Statistical Objects into Tidy Tibbles. https://broom.tidymodels.org/,
+https://github.com/tidymodels/broom.
+
+10. Claus O. Wilke (2020). cowplot: Streamlined Plot Theme and Plot Annotations for 'ggplot2'. R package version 1.1.1. https://wilkelab.org/cowplot/
+
+11. Government of Canada, Statistics Canada. (2021). Population estimates, quarterly. Retrieved May 31, 2021, from https://www150.statcan.gc.ca/t1/tbl1/en/tv.action?pid=1710000901
